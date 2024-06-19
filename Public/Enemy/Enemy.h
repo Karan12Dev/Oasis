@@ -17,30 +17,29 @@ class UE5_LEARNING_API AEnemy : public ABaseCharacter
 {
 	GENERATED_BODY()
 
+
 public:
 	AEnemy();
 
+	// <AActor>
 	virtual void Tick(float DeltaTime) override;
-	void CheckPatrolTarget();
-	void CheckCombatTarget();
-	virtual void GetHit_Implementation(const FVector& ImpactPoint) override;
 	virtual float TakeDamage(float DamageAmount, struct FDamageEvent const& DamageEvent, class AController* EventInstigator, AActor* DamageCauser) override;
 	virtual void Destroyed() override;
+	//</AActor>
+
+	// IHitInterface
+	virtual void GetHit_Implementation(const FVector& ImpactPoint) override;
+
+
 
 protected:
 	virtual void BeginPlay() override;
+
 	virtual void Die() override;
 	virtual void HandleDamage(float DamageAmount) override;
 	virtual int32 PlayDeathMontage() override;
 	virtual void AttackEnd() override;
 
-	bool InTargetRange(AActor* Target, double Radius);
-	void MoveToTarget(AActor* Target);
-	AActor* ChoosePatrolTarget();
-	void Attack();
-
-	UFUNCTION()
-	void PawnSeen(APawn* SeenPawn);
 
 	UPROPERTY(BlueprintReadOnly, VisibleInstanceOnly)
 	EEnemyState EnemyState = EEnemyState::Patrolling;
@@ -49,7 +48,21 @@ protected:
 	TEnumAsByte<EDeadPose> DeadPose;
 
 
+
 private:
+	//	AI Behavior
+	void CheckPatrolTarget();
+	void CheckCombatTarget();
+	void PatrolTimerFinished();
+	void Attack();
+	void StartAttackTimer();
+	bool InTargetRange(AActor* Target, double Radius);
+	void MoveToTarget(AActor* Target);
+	AActor* ChoosePatrolTarget();
+
+	UFUNCTION()
+	void PawnSeen(APawn* SeenPawn);
+
 
 	UPROPERTY(VisibleAnywhere)
 	UHealthBarComponent* HealthBarWidget;
@@ -61,6 +74,9 @@ private:
 	TSubclassOf<class ASword> WeaponClass;
 
 	UPROPERTY()
+	class AAIController* EnemyController;
+
+	UPROPERTY()
 	AActor* CombatTarget;
 
 	UPROPERTY(EditAnywhere)
@@ -69,9 +85,6 @@ private:
 	UPROPERTY(EditAnywhere)
 	double AttackRadius = 150.f;
 
-	/*	Navigation	*/
-
-	// Current PatrolTarget
 	UPROPERTY(EditInstanceOnly, Category = "AI Navigation")
 	AActor* PatrolTarget;
 
@@ -81,22 +94,13 @@ private:
 	UPROPERTY(EditAnywhere)
 	double PatrolRadius = 200.f;
 
-	UPROPERTY()
-	class AAIController* EnemyController;
-
 	FTimerHandle PatrolTimer;
-	void PatrolTimerFinished();
 
-	float WaitMin = 4.f;
-	float WaitMax = 8.f;
+	float PatrolWaitMin = 4.f;
+	float PatrolWaitMax = 8.f;
 
 	FTimerHandle AttackTimer;
-	void StartAttackTimer();
 
 	float AttackMin = 0.5f;
 	float AttackMax = 1.f;
-
-
-public:	
-	
 };

@@ -20,13 +20,7 @@ class UE5_LEARNING_API AGhost : public ABaseCharacter
 	GENERATED_BODY()
 
 public:
-	// Sets default values for this character's properties
 	AGhost();
-
-	// Called every frame
-	virtual void Tick(float DeltaTime) override;
-
-	// Called to bind functionality to input
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 
 	virtual void Jump() override;
@@ -34,8 +28,23 @@ public:
 
 
 protected:
-	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
+
+	void PlayLH_AttackMontage();
+	virtual void AttackEnd() override;
+	bool CanDisarm();
+	bool CanArm();
+	void PlayEquipMontage(FName SectionName);
+
+	UFUNCTION(BluePrintCallable)
+	void AttachDagger();
+
+	UFUNCTION(BluePrintCallable)
+	void DettachDagger();
+
+	UFUNCTION(BluePrintCallable)
+	void FinishEquipping();
+
 
 	UPROPERTY(EditAnyWhere, Category = Input)
 	UInputMappingContext* GhostContext;
@@ -64,29 +73,8 @@ protected:
 	void Attack(const FInputActionValue& Value);
 
 
-	// Play montage functions
-
-	void PlayLH_AttackMontage();
-
-	virtual void AttackEnd() override;
-
-	bool CanDisarm();
-
-	void PlayEquipMontage(FName SectionName);
-
-	bool CanArm();
-
-	UFUNCTION(BluePrintCallable)
-	void AttachDagger();
-
-	UFUNCTION(BluePrintCallable)
-	void DettachDagger();
-
-	UFUNCTION(BluePrintCallable)
-	void FinishEquipping();
 
 private:
-
 	UPROPERTY(EditAnywhere, Category = GhostAttachment)
 	class USpringArmComponent* SpringArm;
 
@@ -105,14 +93,12 @@ private:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadWrite, meta = (AllowPrivateAccess = "true"))
 	EActionState ActionState = EActionState::Unoccupied;
 
-
-	//	Animation Montages
-
 	UPROPERTY(EditDefaultsOnly, Category = AnimationMontages)
 	UAnimMontage* LH_AttackMontage;
 
 	UPROPERTY(EditDefaultsOnly, Category = AnimationMontages)
 	UAnimMontage* EquipMontage;
+
 
 
 public: 

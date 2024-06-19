@@ -4,9 +4,6 @@
 #include "Enemy/Enemy.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/CapsuleComponent.h"
-#include "DrawDebugHelpers.h"
-#include "Kismet/KismetSystemLibrary.h"
-
 #include "Components/AttributeComponent.h"
 #include "HUD/HealthBarComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -38,61 +35,6 @@ AEnemy::AEnemy()
 	PawnSensing->SetPeripheralVisionAngle(50.f);
 }
 
-
-void AEnemy::MoveToTarget(AActor* Target)
-{
-	if (EnemyController == nullptr || Target == nullptr) return;
-
-	FAIMoveRequest MoveRequest;
-	MoveRequest.SetGoalActor(Target);
-	MoveRequest.SetAcceptanceRadius(50.f);
-	EnemyController->MoveTo(MoveRequest);
-}
-
-void AEnemy::PawnSeen(APawn* SeenPawn)
-{
-	if (EnemyState != EEnemyState::Patrolling) return;
-
-	if (SeenPawn->ActorHasTag(FName("Ghost")))
-	{
-		GetWorldTimerManager().ClearTimer(PatrolTimer);
-		GetCharacterMovement()->MaxWalkSpeed = 600.f;
-		CombatTarget = SeenPawn;
-		
-		EnemyState = EEnemyState::Chasing;
-		MoveToTarget(CombatTarget);
-	}
-}
-
-void AEnemy::BeginPlay()
-{
-	Super::BeginPlay();
-
-	if (HealthBarWidget)
-	{
-		HealthBarWidget->SetVisibility(false);
-	}
-
-
-	EnemyController = Cast<AAIController>(GetController());
-	MoveToTarget(PatrolTarget);
-
-	if (PawnSensing)
-	{
-		PawnSensing->OnSeePawn.AddDynamic(this, &AEnemy::PawnSeen);
-	}
-
-	UWorld* World = GetWorld();
-	if (World && WeaponClass)
-	{
-		ASword* DefaultWeapon = World->SpawnActor<ASword>(WeaponClass);
-		DefaultWeapon->Equip(GetMesh(), FName("RH_Socket"), this, this);
-		EquippedSword = DefaultWeapon;
-	}
-}
-
-
-
 void AEnemy::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
@@ -109,12 +51,119 @@ void AEnemy::Tick(float DeltaTime)
 	}
 }
 
+float AEnemy::TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent, AController* EventInstigator, AActor* DamageCauser)
+{
+	HandleDamage(DamageAmount);
+	CombatTarget = EventInstigator->GetPawn();
+	EnemyState = EEnemyState::Chasing;
+	GetCharacterMovement()->MaxWalkSpeed = 600.f;
+	MoveToTarget(CombatTarget);
+	return DamageAmount;
+}
+
+void AEnemy::Destroyed()
+{
+	if (EquippedSword)
+	{
+		EquippedSword->Destroy();
+	}
+}
+
+void AEnemy::GetHit_Implementation(const FVector& ImpactPoint)
+{
+	if (HealthBarWidget)
+	{
+		HealthBarWidget->SetVisibility(true);
+	}
+
+	if (IsAlive())
+	{
+		DirectionalHitReact(ImpactPoint);
+	}
+	else
+	{
+		Die();
+	}
+
+	PlayHitSound(ImpactPoint);
+	SpawnHitParticles(ImpactPoint);
+}
+
+void AEnemy::BeginPlay()
+{
+	Super::BeginPlay();
+
+	EnemyController = Cast<AAIController>(GetController());
+	if (PawnSensing)
+	{
+		PawnSensing->OnSeePawn.AddDynamic(this, &AEnemy::PawnSeen);
+	}
+
+	if (HealthBarWidget)
+	{
+		HealthBarWidget->SetVisibility(false);
+	}
+
+	MoveToTarget(PatrolTarget);
+
+	UWorld* World = GetWorld();
+	if (World && WeaponClass)
+	{
+		ASword* DefaultWeapon = World->SpawnActor<ASword>(WeaponClass);
+		DefaultWeapon->Equip(GetMesh(), FName("RH_Socket"), this, this);
+		EquippedSword = DefaultWeapon;
+	}
+}
+
+void AEnemy::Die()
+{
+	EnemyState = EEnemyState::Dead;
+	GetWorldTimerManager().ClearTimer(AttackTimer);
+	PlayDeathMontage();
+
+	if (HealthBarWidget)
+	{
+		HealthBarWidget->SetVisibility(false);
+	}
+	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	SetLifeSpan(5.f);
+	GetCharacterMovement()->bOrientRotationToMovement = false;
+}
+
+void AEnemy::HandleDamage(float DamageAmount)
+{
+	Super::HandleDamage(DamageAmount);
+
+	if (Attributes && HealthBarWidget)
+	{
+		HealthBarWidget->SetHealthPercent(Attributes->GetHealthPercent());
+	}
+}
+
+int32 AEnemy::PlayDeathMontage()
+{
+	const int32 Selection = Super::PlayDeathMontage();
+	TEnumAsByte<EDeadPose> Pose(Selection);
+	if (Pose < EDeadPose::MAX)
+	{
+		DeadPose = Pose;
+	}
+
+	return Selection;
+}
+
+void AEnemy::AttackEnd()
+{
+	EnemyState = EEnemyState::NoState;
+	CheckCombatTarget();
+}
+
 void AEnemy::CheckPatrolTarget()
 {
 	if (InTargetRange(PatrolTarget, PatrolRadius))
 	{
 		PatrolTarget = ChoosePatrolTarget();
-		const float WaitTime = FMath::RandRange(WaitMin, WaitMax);
+		const float WaitTime = FMath::RandRange(PatrolWaitMin, PatrolWaitMax);
 		GetWorldTimerManager().SetTimer(PatrolTimer, this, &AEnemy::PatrolTimerFinished, WaitTime);
 	}
 }
@@ -148,11 +197,29 @@ void AEnemy::CheckCombatTarget()
 			MoveToTarget(CombatTarget);
 		}
 	}
-	else if (InTargetRange(CombatTarget, AttackRadius) && EnemyState != EEnemyState::Attacking && 
-			EnemyState != EEnemyState::Engaged && EnemyState != EEnemyState::Dead)
-	{	
+	else if (InTargetRange(CombatTarget, AttackRadius) && EnemyState != EEnemyState::Attacking &&
+		EnemyState != EEnemyState::Engaged && EnemyState != EEnemyState::Dead)
+	{
 		StartAttackTimer();
 	}
+}
+
+void AEnemy::PatrolTimerFinished()
+{
+	MoveToTarget(PatrolTarget);
+}
+
+void AEnemy::Attack()
+{
+	EnemyState = EEnemyState::Engaged;
+	PlayAttackMontage();
+}
+
+void AEnemy::StartAttackTimer()
+{
+	EnemyState = EEnemyState::Attacking;
+	const float AttackTime = FMath::RandRange(AttackMin, AttackMax);
+	GetWorldTimerManager().SetTimer(AttackTimer, this, &AEnemy::Attack, AttackTime);
 }
 
 bool AEnemy::InTargetRange(AActor* Target, double Radius)
@@ -160,6 +227,16 @@ bool AEnemy::InTargetRange(AActor* Target, double Radius)
 	if (Target == nullptr) return false;
 	const double DistanceToTarget = (Target->GetActorLocation() - GetActorLocation()).Size();
 	return DistanceToTarget <= Radius;
+}
+
+void AEnemy::MoveToTarget(AActor* Target)
+{
+	if (EnemyController == nullptr || Target == nullptr) return;
+
+	FAIMoveRequest MoveRequest;
+	MoveRequest.SetGoalActor(Target);
+	MoveRequest.SetAcceptanceRadius(50.f);
+	EnemyController->MoveTo(MoveRequest);
 }
 
 AActor* AEnemy::ChoosePatrolTarget()
@@ -182,109 +259,17 @@ AActor* AEnemy::ChoosePatrolTarget()
 	return nullptr;
 }
 
-void AEnemy::Attack()
+void AEnemy::PawnSeen(APawn* SeenPawn)
 {
-	EnemyState = EEnemyState::Engaged;
-	PlayAttackMontage();
-}
+	if (EnemyState != EEnemyState::Patrolling) return;
 
-
-
-void AEnemy::PatrolTimerFinished()
-{
-	MoveToTarget(PatrolTarget);
-}
-
-void AEnemy::StartAttackTimer()
-{
-	EnemyState = EEnemyState::Attacking;
-	const float AttackTime = FMath::RandRange(AttackMin, AttackMax);
-	GetWorldTimerManager().SetTimer(AttackTimer, this, &AEnemy::Attack, AttackTime);
-}
-
-
-void AEnemy::Die()
-{
-	EnemyState = EEnemyState::Dead;
-	GetWorldTimerManager().ClearTimer(AttackTimer);
-	PlayDeathMontage();
-	
-
-	if (HealthBarWidget)
+	if (SeenPawn->ActorHasTag(FName("Ghost")))
 	{
-		HealthBarWidget->SetVisibility(false);
-	}
-	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	SetLifeSpan(5.f);
-	GetCharacterMovement()->bOrientRotationToMovement = false;
-}
-
-
-
-void AEnemy::GetHit_Implementation(const FVector& ImpactPoint)
-{
-	if (HealthBarWidget)
-	{
-		HealthBarWidget->SetVisibility(true);
-	}
-
-	if (IsAlive())
-	{
-		DirectionalHitReact(ImpactPoint);
-	}
-	else 
-	{
-		Die();
-	}
-
-	PlayHitSound(ImpactPoint);
-	SpawnHitParticles(ImpactPoint);
-}
-
-
-void AEnemy::HandleDamage(float DamageAmount)
-{
-	Super::HandleDamage(DamageAmount);
-
-	if (Attributes && HealthBarWidget)
-	{
-		HealthBarWidget->SetHealthPercent(Attributes->GetHealthPercent());
+		GetWorldTimerManager().ClearTimer(PatrolTimer);
+		GetCharacterMovement()->MaxWalkSpeed = 600.f;
+		CombatTarget = SeenPawn;
+		
+		EnemyState = EEnemyState::Chasing;
+		MoveToTarget(CombatTarget);
 	}
 }
-
-int32 AEnemy::PlayDeathMontage()
-{
-	const int32 Selection = Super::PlayDeathMontage();
-	TEnumAsByte<EDeadPose> Pose(Selection);
-	if (Pose < EDeadPose::MAX)
-	{
-		DeadPose = Pose;
-	}
-
-	return Selection;
-}
-
-void AEnemy::AttackEnd()
-{
-	EnemyState = EEnemyState::NoState;
-	CheckCombatTarget();
-}
-
-float AEnemy::TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent, AController* EventInstigator, AActor* DamageCauser)
-{
-	HandleDamage(DamageAmount);
-	CombatTarget = EventInstigator->GetPawn();
-	EnemyState = EEnemyState::Chasing;
-	GetCharacterMovement()->MaxWalkSpeed = 600.f;
-	MoveToTarget(CombatTarget);
-	return DamageAmount;
-}
-
-void AEnemy::Destroyed()
-{
-	if (EquippedSword)
-	{
-		EquippedSword->Destroy();
-	}
-}
-

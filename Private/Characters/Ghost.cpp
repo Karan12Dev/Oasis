@@ -12,13 +12,12 @@
 #include "Items/Item.h"
 #include "Items/Weapon/Sword.h"
 #include "Animation/AnimMontage.h"
-#include "Components/BoxComponent.h"
 
-// Sets default values
+
+
 AGhost::AGhost()
 {
- 	// Set this character to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
-	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bCanEverTick = false;
 
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = false;
@@ -35,8 +34,26 @@ AGhost::AGhost()
 
 }
 
+void AGhost::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
+{
+	Super::SetupPlayerInputComponent(PlayerInputComponent);
 
-// Called when the game starts or when spawned
+	if (UEnhancedInputComponent* EnhancedInputComponent = CastChecked<UEnhancedInputComponent>(PlayerInputComponent))
+	{
+		EnhancedInputComponent->BindAction(MovementAction, ETriggerEvent::Triggered, this, &AGhost::Move);
+		EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &AGhost::Look);
+		EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Started, this, &AGhost::Jump);
+		EnhancedInputComponent->BindAction(RunAction, ETriggerEvent::Triggered, this, &AGhost::Run);
+		EnhancedInputComponent->BindAction(EquipAction, ETriggerEvent::Triggered, this, &AGhost::EquipKeyPressed);
+		EnhancedInputComponent->BindAction(LMBAction, ETriggerEvent::Triggered, this, &AGhost::Attack);
+	}
+}
+
+void AGhost::Jump()
+{
+	Super::Jump();
+}
+
 void AGhost::BeginPlay()
 {
 	Super::BeginPlay();
@@ -52,6 +69,66 @@ void AGhost::BeginPlay()
 	Tags.Add(FName("Ghost"));
 }
 
+void AGhost::PlayLH_AttackMontage()
+{
+	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+	if (AnimInstance && LH_AttackMontage)
+	{
+		AnimInstance->Montage_Play(LH_AttackMontage);
+		FName SectionName = FName("LH_Attack1");
+		AnimInstance->Montage_JumpToSection(SectionName, LH_AttackMontage);
+	}
+}
+
+void AGhost::AttackEnd()
+{
+	ActionState = EActionState::Unoccupied;
+}
+
+bool AGhost::CanDisarm()
+{
+	return ActionState == EActionState::Unoccupied &&
+		CharacterState == ECharacterState::ECS_EquippedTwoHandedWeapon;
+}
+
+bool AGhost::CanArm()
+{
+	return ActionState == EActionState::Unoccupied &&
+		CharacterState == ECharacterState::ECS_EquippedOneHandedWeapon &&
+		EquippedDagger;
+}
+
+void AGhost::PlayEquipMontage(FName SectionName)
+{
+	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+	if (AnimInstance && EquipMontage)
+	{
+		AnimInstance->Montage_Play(EquipMontage);
+		AnimInstance->Montage_JumpToSection(SectionName, EquipMontage);
+	}
+
+}
+
+void AGhost::AttachDagger()
+{
+	if (EquippedDagger)
+	{
+		EquippedDagger->AttachMeshToSocket(GetMesh(), FName("SpineSocket"));
+	}
+}
+
+void AGhost::DettachDagger()
+{
+	if (EquippedDagger)
+	{
+		EquippedDagger->AttachMeshToSocket(GetMesh(), FName("LH_Dagger"));
+	}
+}
+
+void AGhost::FinishEquipping()
+{
+	ActionState = EActionState::Unoccupied;
+}
 
 void AGhost::Move(const FInputActionValue& Value)
 {
@@ -68,7 +145,6 @@ void AGhost::Move(const FInputActionValue& Value)
 	AddMovementInput(PitchDirection, MovementVector.X);
 }
 
-
 void AGhost::Look(const FInputActionValue& Value)
 {
 	const FVector2D LookAxis = Value.Get<FVector2D>();
@@ -79,7 +155,6 @@ void AGhost::Look(const FInputActionValue& Value)
 		AddControllerYawInput(LookAxis.X);
 	}
 }
-
 
 void AGhost::Run(const FInputActionValue& Value)
 {
@@ -94,7 +169,6 @@ void AGhost::Run(const FInputActionValue& Value)
 		GetCharacterMovement()->MaxWalkSpeed = 600.f;
 	}
 }
-
 
 void AGhost::EquipKeyPressed(const FInputActionValue& Value)
 {
@@ -137,31 +211,6 @@ void AGhost::EquipKeyPressed(const FInputActionValue& Value)
 	}
 }
 
-
-void AGhost::PlayEquipMontage(FName SectionName)
-{
-	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
-	if (AnimInstance && EquipMontage)
-	{
-		AnimInstance->Montage_Play(EquipMontage);
-		AnimInstance->Montage_JumpToSection(SectionName, EquipMontage);
-	}
-
-}
-
-
-
-void AGhost::PlayLH_AttackMontage()
-{
-	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
-	if (AnimInstance && LH_AttackMontage)
-	{
-		AnimInstance->Montage_Play(LH_AttackMontage);
-		FName SectionName = FName("LH_Attack1");
-		AnimInstance->Montage_JumpToSection(SectionName, LH_AttackMontage);
-	}
-}
-
 void AGhost::Attack(const FInputActionValue& Value)
 {
 	const bool isLMB_Pressed = Value.Get<bool>();
@@ -179,77 +228,3 @@ void AGhost::Attack(const FInputActionValue& Value)
 		}
 	}
 }
-
-
-void AGhost::AttackEnd()
-{
-	ActionState = EActionState::Unoccupied;
-}
-
-
-bool AGhost::CanDisarm()
-{
-	return ActionState == EActionState::Unoccupied &&
-		CharacterState == ECharacterState::ECS_EquippedTwoHandedWeapon;
-}
-
-bool AGhost::CanArm()
-{
-	return ActionState == EActionState::Unoccupied &&
-		CharacterState == ECharacterState::ECS_EquippedOneHandedWeapon &&
-		EquippedDagger;
-}
-
-void AGhost::AttachDagger()
-{
-	if (EquippedDagger)
-	{
-		EquippedDagger->AttachMeshToSocket(GetMesh(), FName("SpineSocket"));
-	}
-}
-
-void AGhost::DettachDagger()
-{
-	if (EquippedDagger)
-	{
-		EquippedDagger->AttachMeshToSocket(GetMesh(), FName("LH_Dagger"));
-	}
-}
-
-void AGhost::FinishEquipping()
-{
-	ActionState = EActionState::Unoccupied;
-}
-
-
-
-
-// Called every frame
-void AGhost::Tick(float DeltaTime)
-{
-	Super::Tick(DeltaTime);
-}
-
-
-// Called to bind functionality to input
-void AGhost::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
-{
-	Super::SetupPlayerInputComponent(PlayerInputComponent);
-
-	if (UEnhancedInputComponent* EnhancedInputComponent = CastChecked<UEnhancedInputComponent>(PlayerInputComponent))
-	{
-		EnhancedInputComponent->BindAction(MovementAction, ETriggerEvent::Triggered, this, &AGhost::Move);
-		EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &AGhost::Look);
-		EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Started, this, &AGhost::Jump);
-		EnhancedInputComponent->BindAction(RunAction, ETriggerEvent::Triggered, this, &AGhost::Run);
-		EnhancedInputComponent->BindAction(EquipAction, ETriggerEvent::Triggered, this, &AGhost::EquipKeyPressed);
-		EnhancedInputComponent->BindAction(LMBAction, ETriggerEvent::Triggered, this, &AGhost::Attack);
-	}
-}
-
-
-void AGhost::Jump()
-{
-	Super::Jump();
-}
-

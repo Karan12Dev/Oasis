@@ -16,6 +16,11 @@ ABaseCharacter::ABaseCharacter()
 	Attributes = CreateDefaultSubobject<UAttributeComponent>(TEXT("Attributes"));
 }
 
+void ABaseCharacter::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+}
 
 void ABaseCharacter::BeginPlay()
 {
@@ -23,39 +28,13 @@ void ABaseCharacter::BeginPlay()
 	
 }
 
+bool ABaseCharacter::IsAlive()
+{
+	return Attributes && Attributes->IsAlive();
+}
 
 void ABaseCharacter::Die()
 {
-}
-
-int32 ABaseCharacter::PlayAttackMontage()
-{
-	return PlayRandomMontageSection(AttackMontage, AttackMontageSections);
-}
-
-int32 ABaseCharacter::PlayDeathMontage()
-{
-	return PlayRandomMontageSection(DeathMontage, DeathMontageSections);
-}
-
-void ABaseCharacter::PlayMontageSection(UAnimMontage* Montage, const FName& SectionName)
-{
-	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
-	if (AnimInstance && Montage)
-	{
-		AnimInstance->Montage_Play(Montage);
-		AnimInstance->Montage_JumpToSection(SectionName, Montage);
-	}
-}
-
-int32 ABaseCharacter::PlayRandomMontageSection(UAnimMontage* Montage, const TArray<FName>& SectionNames)
-{
-	if (SectionNames.Num() <= 0) return -1;
-
-	const int32 MaxSectionIndex = SectionNames.Num() - 1;
-	const int32 Selection = FMath::RandRange(0, MaxSectionIndex);
-	PlayMontageSection(Montage, SectionNames[Selection]);
-	return Selection;
 }
 
 void ABaseCharacter::PlayHitReactMontage(const FName& SectionName)
@@ -66,6 +45,16 @@ void ABaseCharacter::PlayHitReactMontage(const FName& SectionName)
 		AnimInstance->Montage_Play(HitReactMontage);
 		AnimInstance->Montage_JumpToSection(SectionName, HitReactMontage);
 	}
+}
+
+int32 ABaseCharacter::PlayAttackMontage()
+{
+	return PlayRandomMontageSection(AttackMontage, AttackMontageSections);
+}
+
+int32 ABaseCharacter::PlayDeathMontage()
+{
+	return PlayRandomMontageSection(DeathMontage, DeathMontageSections);
 }
 
 void ABaseCharacter::DirectionalHitReact(const FVector& ImpactPoint)
@@ -102,6 +91,14 @@ void ABaseCharacter::DirectionalHitReact(const FVector& ImpactPoint)
 	PlayHitReactMontage(Section);
 }
 
+void ABaseCharacter::HandleDamage(float DamageAmount)
+{
+	if (Attributes)
+	{
+		Attributes->ReceiveDamage(DamageAmount);
+	}
+}
+
 void ABaseCharacter::PlayHitSound(const FVector& ImpactPoint)
 {
 	if (HitSound)
@@ -119,30 +116,8 @@ void ABaseCharacter::SpawnHitParticles(const FVector& ImpactPoint)
 	}
 }
 
-void ABaseCharacter::HandleDamage(float DamageAmount)
-{
-	if (Attributes)
-	{
-		Attributes->ReceiveDamage(DamageAmount);
-	} 
-}
-
-bool ABaseCharacter::IsAlive()
-{
-	return Attributes && Attributes->IsAlive();
-}
-
-
-
 void ABaseCharacter::AttackEnd()
 {
-}
-
-
-void ABaseCharacter::Tick(float DeltaTime)
-{
-	Super::Tick(DeltaTime);
-
 }
 
 void ABaseCharacter::SetSwordCollisionEnabled(ECollisionEnabled::Type CollisionEnabled)
@@ -154,4 +129,22 @@ void ABaseCharacter::SetSwordCollisionEnabled(ECollisionEnabled::Type CollisionE
 	}
 }
 
+void ABaseCharacter::PlayMontageSection(UAnimMontage* Montage, const FName& SectionName)
+{
+	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+	if (AnimInstance && Montage)
+	{
+		AnimInstance->Montage_Play(Montage);
+		AnimInstance->Montage_JumpToSection(SectionName, Montage);
+	}
+}
 
+int32 ABaseCharacter::PlayRandomMontageSection(UAnimMontage* Montage, const TArray<FName>& SectionNames)
+{
+	if (SectionNames.Num() <= 0) return -1;
+
+	const int32 MaxSectionIndex = SectionNames.Num() - 1;
+	const int32 Selection = FMath::RandRange(0, MaxSectionIndex);
+	PlayMontageSection(Montage, SectionNames[Selection]);
+	return Selection;
+}
