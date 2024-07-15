@@ -9,15 +9,21 @@
 #include "GameFramework/SpringArmComponent.h"
 #include "Camera/CameraComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Components/AttributeComponent.h"
 #include "Items/Item.h"
 #include "Items/Weapon/Sword.h"
 #include "Animation/AnimMontage.h"
-
+#include "HUD/GhostHUD.h"
+#include "HUD/GhostOverlay.h"
+#include "Items/Soul.h"
+#include "Items/Treasure.h"
+#include "Items/Health.h"
 
 
 AGhost::AGhost()
 {
-	PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bCanEverTick = true;
 
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = false;
@@ -26,12 +32,28 @@ AGhost::AGhost()
 	GetCharacterMovement()->bOrientRotationToMovement = true;
 	GetCharacterMovement()->RotationRate = FRotator(0.f, 380.f, 0.f);
 
+	GetMesh()->SetCollisionObjectType(ECollisionChannel::ECC_WorldDynamic);
+	GetMesh()->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Ignore);
+	GetMesh()->SetCollisionResponseToChannel(ECollisionChannel::ECC_Visibility, ECollisionResponse::ECR_Block);
+	GetMesh()->SetCollisionResponseToChannel(ECollisionChannel::ECC_WorldDynamic, ECollisionResponse::ECR_Overlap);
+	GetMesh()->SetGenerateOverlapEvents(true);
+
 	SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArm"));
 	SpringArm->SetupAttachment(GetRootComponent());
 
 	Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
 	Camera->SetupAttachment(SpringArm);
+}
 
+void AGhost::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	if (Attributes && GhostOverlay)
+	{
+		Attributes->RegenStamina(DeltaTime);
+		GhostOverlay->SetStaminaBarPercent(Attributes->GetStaminaPercent());
+	}
 }
 
 void AGhost::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -46,12 +68,64 @@ void AGhost::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 		EnhancedInputComponent->BindAction(RunAction, ETriggerEvent::Triggered, this, &AGhost::Run);
 		EnhancedInputComponent->BindAction(EquipAction, ETriggerEvent::Triggered, this, &AGhost::EquipKeyPressed);
 		EnhancedInputComponent->BindAction(LMBAction, ETriggerEvent::Triggered, this, &AGhost::Attack);
+		EnhancedInputComponent->BindAction(DodgeAction, ETriggerEvent::Started, this, &AGhost::Dodge);
 	}
 }
 
 void AGhost::Jump()
 {
+	if (ActionState != EActionState::Unoccupied) return;
 	Super::Jump();
+}
+
+void AGhost::GetHit_Implementation(const FVector& ImpactPoint, AActor* Hitter)
+{
+	Super::GetHit_Implementation(ImpactPoint, Hitter);
+
+	if (Attributes && Attributes->GetHealthPercent() > 0.f)
+	{
+		ActionState = EActionState::HitReaction;
+	}
+}
+
+float AGhost::TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent, AController* EventInstigator, AActor* DamageCauser)
+{
+	HandleDamage(DamageAmount);
+	SetHUDHealth();
+
+	return DamageAmount;
+}
+
+void AGhost::SetOverlappingItem(AItem* Item)
+{
+	OverlappingItem = Item;
+}
+
+void AGhost::AddSouls(ASoul* Soul)
+{
+	if (Attributes && GhostOverlay)
+	{
+		Attributes->AddSouls(Soul->GetSouls());
+		GhostOverlay->SetSouls(Attributes->GetSouls());
+	}
+}
+
+void AGhost::AddGold(ATreasure* Treasure)
+{
+	if (Attributes && GhostOverlay)
+	{
+		Attributes->AddGold(Treasure->GetGold());
+		GhostOverlay->SetGold(Attributes->GetGold());
+	}
+}
+
+void AGhost::AddHealth(AHealth* Health)
+{
+	if (Attributes && GhostOverlay && Attributes->GetHealth() <= Attributes->GetMaxHealth() - Attributes->GetHealthPoints())
+	{
+		Attributes->GainHealth(Attributes->GetHealthPoints());
+		GhostOverlay->SetHealthBarPercent(Attributes->GetHealthPercent());
+	}
 }
 
 void AGhost::BeginPlay()
@@ -64,6 +138,8 @@ void AGhost::BeginPlay()
 		{
 			Subsystem->AddMappingContext(GhostContext, 0);
 		}
+
+		InitializeGhostOverlay(PlayerController);
 	}
 
 	Tags.Add(FName("Ghost"));
@@ -106,7 +182,23 @@ void AGhost::PlayEquipMontage(FName SectionName)
 		AnimInstance->Montage_Play(EquipMontage);
 		AnimInstance->Montage_JumpToSection(SectionName, EquipMontage);
 	}
+}
 
+void AGhost::Die()
+{
+	Super::Die();
+	ActionState = EActionState::Dead;
+}
+
+void AGhost::PlayDodgeMontage()
+{
+	UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+	if (AnimInstance && DodgeMontage)
+	{
+		AnimInstance->Montage_Play(DodgeMontage);
+		FName SectionName = FName("Dodge");
+		AnimInstance->Montage_JumpToSection(SectionName, DodgeMontage);
+	}
 }
 
 void AGhost::AttachDagger()
@@ -126,6 +218,11 @@ void AGhost::DettachDagger()
 }
 
 void AGhost::FinishEquipping()
+{
+	ActionState = EActionState::Unoccupied;
+}
+
+void AGhost::HitReactEnd()
 {
 	ActionState = EActionState::Unoccupied;
 }
@@ -227,4 +324,51 @@ void AGhost::Attack(const FInputActionValue& Value)
 			ActionState = EActionState::Attacking;
 		}
 	}
+}
+
+void AGhost::Dodge(const FInputActionValue& Value)
+{
+	if (ActionState != EActionState::Unoccupied)  return;
+
+	//const bool isLAltPressed = Value.Get<bool>();
+
+	if (Attributes && Attributes->GetStamina() > Attributes->GetDodgeCost() && GhostOverlay)
+	{
+		PlayDodgeMontage();
+		ActionState = EActionState::Dodge;
+		Attributes->UseStamina(Attributes->GetDodgeCost());
+		GhostOverlay->SetStaminaBarPercent(Attributes->GetStaminaPercent());
+	}
+}
+
+void AGhost::InitializeGhostOverlay(APlayerController* PlayerController)
+{
+	if (PlayerController)
+	{
+		AGhostHUD* GhostHUD = Cast<AGhostHUD>(PlayerController->GetHUD());
+		if (GhostHUD)
+		{
+			GhostOverlay = GhostHUD->GetGhostOverlay();
+			if (GhostOverlay && Attributes)
+			{
+				GhostOverlay->SetHealthBarPercent(Attributes->GetHealthPercent());
+				GhostOverlay->SetStaminaBarPercent(1.f);
+				GhostOverlay->SetGold(0);
+				GhostOverlay->SetSouls(0);
+			}
+		}
+	}
+}
+
+void AGhost::SetHUDHealth()
+{
+	if (GhostOverlay && Attributes)
+	{
+		GhostOverlay->SetHealthBarPercent(Attributes->GetHealthPercent());
+	}
+}
+
+void AGhost::DodgeEnd()
+{
+	ActionState = EActionState::Unoccupied;
 }

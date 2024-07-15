@@ -8,6 +8,8 @@
 
 
 class USphereComponent;
+class UNiagaraSystem;
+
 
 enum class EItemState : uint8
 {
@@ -48,6 +50,9 @@ protected:
 	UFUNCTION()
 	virtual void OnSphereEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
 
+	virtual void SpawnPickupSystem();
+	virtual void SpawnPickupSound();
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
 	UStaticMeshComponent* ItemMesh;
 
@@ -57,7 +62,7 @@ protected:
 	USphereComponent* Sphere;
 
 	UPROPERTY(EditAnywhere)
-	class UNiagaraComponent* EmbersEffect;
+	class UNiagaraComponent* ItemEffect;
 
 private:
 
@@ -70,7 +75,11 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sin Parameters", meta = (AllowPrivateAccess = "true"))
 	float TimeConstant = 5.f;
 
+	UPROPERTY(EditAnywhere)
+	UNiagaraSystem* PickupEffect;
 
+	UPROPERTY(EditAnywhere)
+	USoundBase* PickupSound;
 };
 
 template<typename T>

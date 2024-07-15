@@ -6,25 +6,34 @@
 #include "InputActionValue.h"
 #include "CharacterType.h"
 #include "BaseCharacter.h"
+#include "Interfaces/PickupInterface.h"
 #include "Ghost.generated.h"
 
 class UInputMappingContext;
 class UInputAction;
 class AItem;
 class UAnimMontage;
+class ASoul;
+class ATreasure;
 
 
 UCLASS()
-class UE5_LEARNING_API AGhost : public ABaseCharacter
+class UE5_LEARNING_API AGhost : public ABaseCharacter, public IPickupInterface
 {
 	GENERATED_BODY()
 
 public:
 	AGhost();
+	virtual void Tick(float DeltaTime) override;
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 
 	virtual void Jump() override;
-
+	virtual void GetHit_Implementation(const FVector& ImpactPoint, AActor* Hitter) override;
+	virtual float TakeDamage(float DamageAmount, struct FDamageEvent const& DamageEvent, class AController* EventInstigator, AActor* DamageCauser) override;
+	virtual void SetOverlappingItem(AItem* Item) override;
+	virtual void AddSouls(ASoul* Soul) override;
+	virtual void AddGold(ATreasure* Treasure) override;
+	virtual void AddHealth(class AHealth* Health) override;
 
 
 protected:
@@ -35,6 +44,8 @@ protected:
 	bool CanDisarm();
 	bool CanArm();
 	void PlayEquipMontage(FName SectionName);
+	virtual void Die() override;
+	void PlayDodgeMontage();
 
 	UFUNCTION(BluePrintCallable)
 	void AttachDagger();
@@ -44,6 +55,9 @@ protected:
 
 	UFUNCTION(BluePrintCallable)
 	void FinishEquipping();
+
+	UFUNCTION(BlueprintCallable)
+	void HitReactEnd();
 
 
 	UPROPERTY(EditAnyWhere, Category = Input)
@@ -72,9 +86,19 @@ protected:
 	UInputAction* LMBAction;
 	void Attack(const FInputActionValue& Value);
 
+	UPROPERTY(EditDefaultsOnly, Category = Input)
+	UInputAction* DodgeAction;
+	void Dodge(const FInputActionValue& Value);
 
 
 private:
+	void InitializeGhostOverlay(APlayerController* PlayerController);
+	void SetHUDHealth();
+
+	UFUNCTION(BlueprintCallable)
+	void DodgeEnd();
+
+
 	UPROPERTY(EditAnywhere, Category = GhostAttachment)
 	class USpringArmComponent* SpringArm;
 
@@ -87,9 +111,6 @@ private:
 	UPROPERTY(VisibleInstanceOnly)
 	ECharacterState CharacterState = ECharacterState::ECS_Unequipped;
 
-	UPROPERTY(VisibleAnywhere, Category = Weapon)
-	ASword* EquippedDagger;
-
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadWrite, meta = (AllowPrivateAccess = "true"))
 	EActionState ActionState = EActionState::Unoccupied;
 
@@ -99,10 +120,15 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = AnimationMontages)
 	UAnimMontage* EquipMontage;
 
+	UPROPERTY()
+	class UGhostOverlay* GhostOverlay;
+
+	UPROPERTY(EditDefaultsOnly, Category = AnimationMontage)
+	UAnimMontage* DodgeMontage;
+
 
 
 public: 
-	FORCEINLINE void SetOverlappingItem(AItem* Item) { OverlappingItem = Item; }
-
 	FORCEINLINE ECharacterState GetCharacterState() const { return CharacterState; }
+	FORCEINLINE EActionState GetActionState() const { return ActionState;  }
 };

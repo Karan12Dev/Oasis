@@ -10,6 +10,7 @@
 #include "AIController.h"
 #include "Perception/PawnSensingComponent.h"
 #include "Items/Weapon/Sword.h"
+#include "Items/Soul.h"
 
 
 AEnemy::AEnemy()
@@ -19,8 +20,8 @@ AEnemy::AEnemy()
 	GetMesh()->SetCollisionObjectType(ECollisionChannel::ECC_WorldDynamic);
 	GetMesh()->SetCollisionResponseToChannel(ECollisionChannel::ECC_Visibility, ECollisionResponse::ECR_Block);
 	GetMesh()->SetCollisionResponseToChannel(ECollisionChannel::ECC_Camera, ECollisionResponse::ECR_Ignore);
-	GetMesh()->SetGenerateOverlapEvents(true);
 	GetCapsuleComponent()->SetCollisionResponseToChannel(ECollisionChannel::ECC_Camera, ECollisionResponse::ECR_Ignore);
+	GetMesh()->SetGenerateOverlapEvents(true);
 
 	HealthBarWidget = CreateDefaultSubobject<UHealthBarComponent>(TEXT("Healh Bar"));
 	HealthBarWidget->SetupAttachment(GetRootComponent());
@@ -55,43 +56,59 @@ float AEnemy::TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent, AC
 {
 	HandleDamage(DamageAmount);
 	CombatTarget = EventInstigator->GetPawn();
-	EnemyState = EEnemyState::Chasing;
-	GetCharacterMovement()->MaxWalkSpeed = 600.f;
-	MoveToTarget(CombatTarget);
+
+	if (InTargetRange(CombatTarget, AttackRadius))
+	{
+		EnemyState = EEnemyState::Attacking;
+	}
+	else if (!InTargetRange(CombatTarget, AttackRadius))
+	{
+		EnemyState = EEnemyState::Chasing;
+		GetCharacterMovement()->MaxWalkSpeed = ChasingSpeed;
+		MoveToTarget(CombatTarget);
+	}
+
 	return DamageAmount;
 }
 
 void AEnemy::Destroyed()
 {
-	if (EquippedSword)
+	if (EquippedSword && EquippedDagger)
 	{
 		EquippedSword->Destroy();
+		EquippedDagger->Destroy();
 	}
 }
 
-void AEnemy::GetHit_Implementation(const FVector& ImpactPoint)
+void AEnemy::GetHit_Implementation(const FVector& ImpactPoint, AActor* Hitter)
 {
-	if (HealthBarWidget)
+	Super::GetHit_Implementation(ImpactPoint, Hitter);
+
+	if (EnemyState != EEnemyState::Dead)
 	{
-		HealthBarWidget->SetVisibility(true);
+		if (HealthBarWidget)
+		{
+			HealthBarWidget->SetVisibility(true);
+		}
 	}
 
-	if (IsAlive())
-	{
-		DirectionalHitReact(ImpactPoint);
-	}
-	else
-	{
-		Die();
-	}
+	GetWorldTimerManager().ClearTimer(PatrolTimer);
+	GetWorldTimerManager().ClearTimer(AttackTimer);
 
-	PlayHitSound(ImpactPoint);
-	SpawnHitParticles(ImpactPoint);
+	StopAttackMontage();
+
+	if (InTargetRange(CombatTarget, AttackRadius))
+	{
+		if (ActorHasTag(FName("Dead"))) return;
+		StartAttackTimer();
+	}
 }
 
 void AEnemy::BeginPlay()
 {
 	Super::BeginPlay();
+
+	Tags.Add(FName("Enemy"));
 
 	EnemyController = Cast<AAIController>(GetController());
 	if (PawnSensing)
@@ -107,19 +124,30 @@ void AEnemy::BeginPlay()
 	MoveToTarget(PatrolTarget);
 
 	UWorld* World = GetWorld();
-	if (World && WeaponClass)
+	if (World == nullptr || WeaponClasses.IsEmpty() || SocketNames.IsEmpty()) return;
+	if (WeaponClasses.Num() > 0 && SocketNames.Num() > 0)
 	{
-		ASword* DefaultWeapon = World->SpawnActor<ASword>(WeaponClass);
-		DefaultWeapon->Equip(GetMesh(), FName("RH_Socket"), this, this);
-		EquippedSword = DefaultWeapon;
+		int32 SocketCount = 0;
+		for (const TSubclassOf<ASword>& Weapon : WeaponClasses)
+		{
+			if (SocketCount >= SocketNames.Num() || SocketNames[SocketCount].IsNone()) return;
+			ASword* SpawnedWeapon = World->SpawnActor<ASword>(Weapon);
+			if (SpawnedWeapon)
+			{
+				SpawnedWeapon->Equip(GetMesh(), SocketNames[SocketCount], this, this);
+				EquippedWeapons.Add(SpawnedWeapon);
+				SocketCount++;
+			}
+		}
 	}
 }
 
 void AEnemy::Die()
 {
+	Super::Die();
+
 	EnemyState = EEnemyState::Dead;
 	GetWorldTimerManager().ClearTimer(AttackTimer);
-	PlayDeathMontage();
 
 	if (HealthBarWidget)
 	{
@@ -128,6 +156,10 @@ void AEnemy::Die()
 	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	SetLifeSpan(5.f);
 	GetCharacterMovement()->bOrientRotationToMovement = false;
+	SetSwordCollisionEnabled(ECollisionEnabled::NoCollision);
+	SetWeaponsCollsionEnabled(ECollisionEnabled::NoCollision);
+
+	SpawnSoul();
 }
 
 void AEnemy::HandleDamage(float DamageAmount)
@@ -138,18 +170,6 @@ void AEnemy::HandleDamage(float DamageAmount)
 	{
 		HealthBarWidget->SetHealthPercent(Attributes->GetHealthPercent());
 	}
-}
-
-int32 AEnemy::PlayDeathMontage()
-{
-	const int32 Selection = Super::PlayDeathMontage();
-	TEnumAsByte<EDeadPose> Pose(Selection);
-	if (Pose < EDeadPose::MAX)
-	{
-		DeadPose = Pose;
-	}
-
-	return Selection;
 }
 
 void AEnemy::AttackEnd()
@@ -183,7 +203,7 @@ void AEnemy::CheckCombatTarget()
 		if (EnemyState != EEnemyState::Engaged)
 		{
 			EnemyState = EEnemyState::Patrolling;
-			GetCharacterMovement()->MaxWalkSpeed = 160.f;
+			GetCharacterMovement()->MaxWalkSpeed = PatrollingSpeed;
 			MoveToTarget(PatrolTarget);
 		}
 	}
@@ -193,7 +213,7 @@ void AEnemy::CheckCombatTarget()
 		if (EnemyState != EEnemyState::Engaged)
 		{
 			EnemyState = EEnemyState::Chasing;
-			GetCharacterMovement()->MaxWalkSpeed = 600.f;
+			GetCharacterMovement()->MaxWalkSpeed = ChasingSpeed;
 			MoveToTarget(CombatTarget);
 		}
 	}
@@ -211,6 +231,8 @@ void AEnemy::PatrolTimerFinished()
 
 void AEnemy::Attack()
 {
+	if (CombatTarget && CombatTarget->ActorHasTag(FName("Dead"))) return;
+
 	EnemyState = EEnemyState::Engaged;
 	PlayAttackMontage();
 }
@@ -235,7 +257,7 @@ void AEnemy::MoveToTarget(AActor* Target)
 
 	FAIMoveRequest MoveRequest;
 	MoveRequest.SetGoalActor(Target);
-	MoveRequest.SetAcceptanceRadius(50.f);
+	MoveRequest.SetAcceptanceRadius(AcceptanceRadius);
 	EnemyController->MoveTo(MoveRequest);
 }
 
@@ -259,6 +281,21 @@ AActor* AEnemy::ChoosePatrolTarget()
 	return nullptr;
 }
 
+void AEnemy::SpawnSoul()
+{
+	UWorld* World = GetWorld();
+	if (World && SoulClass && Attributes)
+	{
+		const FVector SpawnLocation = GetActorLocation() + FVector(0.f, 0.f, 125.f);
+		ASoul* SpawnedSoul = World->SpawnActor<ASoul>(SoulClass, SpawnLocation, GetActorRotation());
+		if (SpawnedSoul)
+		{
+			SpawnedSoul->SetSouls(Attributes->GetSouls());
+			SpawnedSoul->SetOwner(this);
+		}
+	}
+}
+
 void AEnemy::PawnSeen(APawn* SeenPawn)
 {
 	if (EnemyState != EEnemyState::Patrolling) return;
@@ -266,7 +303,7 @@ void AEnemy::PawnSeen(APawn* SeenPawn)
 	if (SeenPawn->ActorHasTag(FName("Ghost")))
 	{
 		GetWorldTimerManager().ClearTimer(PatrolTimer);
-		GetCharacterMovement()->MaxWalkSpeed = 600.f;
+		GetCharacterMovement()->MaxWalkSpeed = ChasingSpeed;
 		CombatTarget = SeenPawn;
 		
 		EnemyState = EEnemyState::Chasing;

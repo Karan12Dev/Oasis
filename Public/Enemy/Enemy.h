@@ -28,7 +28,7 @@ public:
 	//</AActor>
 
 	// IHitInterface
-	virtual void GetHit_Implementation(const FVector& ImpactPoint) override;
+	virtual void GetHit_Implementation(const FVector& ImpactPoint, AActor* Hitter) override;
 
 
 
@@ -37,15 +37,11 @@ protected:
 
 	virtual void Die() override;
 	virtual void HandleDamage(float DamageAmount) override;
-	virtual int32 PlayDeathMontage() override;
 	virtual void AttackEnd() override;
 
 
 	UPROPERTY(BlueprintReadOnly, VisibleInstanceOnly)
 	EEnemyState EnemyState = EEnemyState::Patrolling;
-
-	UPROPERTY(BlueprintReadOnly)
-	TEnumAsByte<EDeadPose> DeadPose;
 
 
 
@@ -59,6 +55,7 @@ private:
 	bool InTargetRange(AActor* Target, double Radius);
 	void MoveToTarget(AActor* Target);
 	AActor* ChoosePatrolTarget();
+	void SpawnSoul();
 
 	UFUNCTION()
 	void PawnSeen(APawn* SeenPawn);
@@ -70,20 +67,17 @@ private:
 	UPROPERTY(VisibleAnywhere)
 	class UPawnSensingComponent* PawnSensing;
 
-	UPROPERTY(EditAnywhere)
-	TSubclassOf<class ASword> WeaponClass;
-
 	UPROPERTY()
 	class AAIController* EnemyController;
 
-	UPROPERTY()
-	AActor* CombatTarget;
+	UPROPERTY(EditAnywhere, Category = Combat)
+	double CombatRadius = 1000.f;
 
-	UPROPERTY(EditAnywhere)
-	double CombatRadius = 500.f;
-
-	UPROPERTY(EditAnywhere)
+	UPROPERTY(EditAnywhere, Category = Combat)
 	double AttackRadius = 150.f;
+
+	UPROPERTY(EditAnywhere, Category = Combat)
+	double AcceptanceRadius = 50.f;
 
 	UPROPERTY(EditInstanceOnly, Category = "AI Navigation")
 	AActor* PatrolTarget;
@@ -91,8 +85,14 @@ private:
 	UPROPERTY(EditInstanceOnly, Category = "AI Navigation")
 	TArray<AActor*> PatrolTargets;
 
-	UPROPERTY(EditAnywhere)
+	UPROPERTY(EditAnywhere, Category = "AI Navigation")
 	double PatrolRadius = 200.f;
+
+	UPROPERTY(EditAnywhere, Category = "AI Navigation")
+	float PatrollingSpeed;
+
+	UPROPERTY(EditAnywhere, Category = "AI Navigation")
+	float ChasingSpeed;
 
 	FTimerHandle PatrolTimer;
 
@@ -101,6 +101,12 @@ private:
 
 	FTimerHandle AttackTimer;
 
-	float AttackMin = 0.5f;
-	float AttackMax = 1.f;
+	UPROPERTY(EditAnywhere, Category = Combat)
+	float AttackMin = 0.1f;
+
+	UPROPERTY(EditAnywhere, Category = Combat)
+	float AttackMax = 0.4f;
+
+	UPROPERTY(EditAnywhere, Category = "Spawn")
+	TSubclassOf<class ASoul> SoulClass;
 };

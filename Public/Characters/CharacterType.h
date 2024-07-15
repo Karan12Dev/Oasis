@@ -12,8 +12,11 @@ UENUM(BlueprintType)
 enum class EActionState : uint8
 {
 	Unoccupied UMETA(DisplayName = "Unoccupied"),
+	HitReaction UMETA(DisplayName = "HitReaction"),
 	Attacking UMETA(DisplayName = "Attacking"),
-	EquippingWeapon UMETA(DisplayName = "Equipping Weapon")
+	Dodge UMETA(DisplayName = "Dodge"),
+	EquippingWeapon UMETA(DisplayName = "Equipping Weapon"),
+	Dead UMETA(DisplayName = "Dead")
 };
 
 UENUM(BlueprintType)
@@ -31,11 +34,11 @@ enum EDeadPose
 UENUM(BlueprintType)
 enum class EEnemyState : uint8
 {
+	NoState UMETA(DisplayName = "NoState"),
+
 	Dead UMETA(DisplayName = "Dead"),
 	Patrolling UMETA(DisplayName = "Patolling"),
 	Chasing UMETA(DisplayName = "Chasing"),
 	Attacking UMETA(DisplayName = "Attacking"),
-	Engaged UMETA(DisplayName = "Engaged"),
-
-	NoState UMETA(DisplayName = "NoState")
+	Engaged UMETA(DisplayName = "Engaged")
 };

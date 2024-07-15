@@ -26,5 +26,7 @@ void UGhost_AnimInstance::NativeUpdateAnimation(float Deltatime)
 		GroundSpeed = UKismetMathLibrary::VSizeXY(GhostCharacterMovement->Velocity);
 		IsFalling = GhostCharacterMovement->IsFalling();
 		CharacterState = GhostCharacter->GetCharacterState(); 
+		ActionState = GhostCharacter->GetActionState();
+		DeadPose = GhostCharacter->GetDeadPose();
 	}
 }
